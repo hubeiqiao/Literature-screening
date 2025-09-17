@@ -51,24 +51,35 @@ export function DecisionTable({ decisions }: DecisionTableProps) {
         />
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+        <table className="min-w-full table-fixed divide-y divide-slate-200 text-left text-sm">
+          <colgroup>
+            <col className="w-12" />
+            <col className="w-36" />
+            <col className="w-16" />
+            <col className="w-20" />
+            <col className="w-20" />
+            <col className="w-40" />
+            <col className="w-16" />
+            <col className="w-20" />
+            <col className="w-[60%]" />
+          </colgroup>
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">Key</th>
-              <th className="px-4 py-3">Title</th>
-              <th className="px-4 py-3">Year</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Confidence</th>
-              <th className="px-4 py-3">Matched rules</th>
-              <th className="px-4 py-3">Source</th>
-              <th className="px-4 py-3">Model</th>
-              <th className="px-4 py-3">Rationale</th>
+              <th className="w-12 px-2 py-3">Key</th>
+              <th className="w-36 px-4 py-3">Title</th>
+              <th className="w-16 px-4 py-3">Year</th>
+              <th className="w-20 px-4 py-3">Status</th>
+              <th className="w-20 px-4 py-3">Confidence</th>
+              <th className="w-40 px-4 py-3">Matched rules</th>
+              <th className="w-16 px-4 py-3">Source</th>
+              <th className="w-20 px-4 py-3">Model</th>
+              <th className="w-[60%] px-4 py-3">Rationale</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white">
             {filtered.map((decision) => (
               <tr key={decision.key}>
-                <td className="px-4 py-3 font-mono text-xs text-slate-500">{decision.key}</td>
+                <td className="w-12 px-2 py-3 font-mono text-xs text-slate-500 break-all whitespace-normal">{decision.key}</td>
                 <td className="px-4 py-3 text-sm text-slate-900">{decision.title || '—'}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{decision.year || '—'}</td>
                 <td className="px-4 py-3 text-sm font-medium text-slate-900">{decision.status}</td>
@@ -79,7 +90,7 @@ export function DecisionTable({ decisions }: DecisionTableProps) {
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-600">{decision.source ?? '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-600">{decision.model ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-600">{decision.rationale ?? '—'}</td>
+                <td className="px-4 py-3 text-xs text-slate-600 align-top">{decision.rationale ?? '—'}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
