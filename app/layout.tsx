@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { AnalyticsProvider } from '../components/Analytics';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -10,6 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen bg-slate-50 text-slate-900">
+        <AnalyticsProvider />
         <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
           <main className="flex-1">{children}</main>
           <footer className="mt-12 border-t border-slate-200 pt-6 text-sm text-slate-600">
