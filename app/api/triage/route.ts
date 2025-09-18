@@ -59,9 +59,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Missing ${label} API key.` }, { status: 401 });
     }
 
-    const dataPolicy = provider === 'openrouter'
-      ? request.headers.get('x-openrouter-data-policy')?.trim() || 'permissive'
-      : undefined;
+    const dataPolicy =
+      provider === 'openrouter'
+        ? request.headers.get('x-openrouter-data-policy')?.trim() || undefined
+        : undefined;
 
     const criteriaRules = heuristics ?? buildCriteriaFromText(instructions as CriteriaTextInput);
     const deterministic = triageRecord(entry, criteriaRules as ScreeningCriteria);
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
             instructions: instructions as CriteriaTextInput,
             deterministic,
             key,
-            dataPolicy: dataPolicy!,
+            dataPolicy,
             effort: reasoning ?? 'high',
           })
         : await runGeminiPass({ entry, instructions: instructions as CriteriaTextInput, deterministic, key });
@@ -112,7 +113,7 @@ async function runOpenRouterPass({
   instructions: CriteriaTextInput;
   deterministic: ReturnType<typeof triageRecord>;
   key: string;
-  dataPolicy: string;
+  dataPolicy?: string;
   effort: ReasoningEffort;
 }): Promise<{ decision: TriageDecision | null; warning?: string }> {
   let lastError: string | undefined;
@@ -120,15 +121,19 @@ async function runOpenRouterPass({
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       const payload = buildOpenRouterPayload(entry, instructions, deterministic, effort);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+        'HTTP-Referer': 'https://literature-screening.local/',
+        'X-Title': 'Literature Screening Assistant',
+      };
+      if (dataPolicy) {
+        headers['X-OpenRouter-Data-Policy'] = dataPolicy;
+      }
+
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${key}`,
-          'HTTP-Referer': 'https://literature-screening.local/',
-          'X-Title': 'Literature Screening Assistant',
-          'X-OpenRouter-Data-Policy': dataPolicy,
-        },
+        headers,
         body: JSON.stringify(payload),
       });
 
