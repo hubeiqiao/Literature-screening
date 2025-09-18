@@ -10,6 +10,8 @@ interface ModelCredentialsFormProps {
   onProviderChange: (provider: Provider) => void;
   openRouterKey: string;
   onOpenRouterKeyChange: (value: string) => void;
+  openRouterDataPolicy: string;
+  onOpenRouterDataPolicyChange: (value: string) => void;
   geminiKey: string;
   onGeminiKeyChange: (value: string) => void;
   reasoningEffort: ReasoningEffort;
@@ -19,6 +21,7 @@ interface ModelCredentialsFormProps {
 
 const STORAGE_KEYS = {
   openRouter: 'literature-screening:openrouter-key',
+  openRouterPolicy: 'literature-screening:openrouter-data-policy',
   gemini: 'literature-screening:gemini-key',
   reasoning: 'literature-screening:openrouter-reasoning',
 } as const;
@@ -28,6 +31,8 @@ export function ModelCredentialsForm({
   onProviderChange,
   openRouterKey,
   onOpenRouterKeyChange,
+  openRouterDataPolicy,
+  onOpenRouterDataPolicyChange,
   geminiKey,
   onGeminiKeyChange,
   reasoningEffort,
@@ -35,17 +40,39 @@ export function ModelCredentialsForm({
   disabled,
 }: ModelCredentialsFormProps) {
   const [status, setStatus] = useState<'idle' | 'saved'>('idle');
+  const [policyOption, setPolicyOption] = useState<'account' | 'permissive' | 'custom'>(() => {
+    if (!openRouterDataPolicy) {
+      return 'account';
+    }
+    if (openRouterDataPolicy === 'permissive') {
+      return 'permissive';
+    }
+    return 'custom';
+  });
+  const [customPolicy, setCustomPolicy] = useState(() =>
+    openRouterDataPolicy && openRouterDataPolicy !== 'permissive' ? openRouterDataPolicy : '',
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
     const storedOpenRouter = window.localStorage.getItem(STORAGE_KEYS.openRouter);
+    const storedOpenRouterPolicy = window.localStorage.getItem(STORAGE_KEYS.openRouterPolicy);
     const storedGemini = window.localStorage.getItem(STORAGE_KEYS.gemini);
     const storedReasoning = window.localStorage.getItem(STORAGE_KEYS.reasoning) as ReasoningEffort | null;
 
     if (storedOpenRouter) {
       onOpenRouterKeyChange(storedOpenRouter);
+    }
+    if (storedOpenRouterPolicy) {
+      onOpenRouterDataPolicyChange(storedOpenRouterPolicy);
+      if (storedOpenRouterPolicy === 'permissive') {
+        setPolicyOption('permissive');
+      } else {
+        setPolicyOption('custom');
+        setCustomPolicy(storedOpenRouterPolicy);
+      }
     }
     if (storedGemini) {
       onGeminiKeyChange(storedGemini);
@@ -57,15 +84,44 @@ export function ModelCredentialsForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!openRouterDataPolicy) {
+      if (policyOption !== 'custom') {
+        setPolicyOption('account');
+      }
+      return;
+    }
+    if (openRouterDataPolicy === 'permissive') {
+      setPolicyOption('permissive');
+      return;
+    }
+    setPolicyOption('custom');
+    setCustomPolicy(openRouterDataPolicy);
+  }, [openRouterDataPolicy, policyOption]);
+
   const handleSave = () => {
     if (typeof window === 'undefined') {
       return;
     }
     window.localStorage.setItem(STORAGE_KEYS.openRouter, openRouterKey.trim());
+    window.localStorage.setItem(STORAGE_KEYS.openRouterPolicy, openRouterDataPolicy.trim());
     window.localStorage.setItem(STORAGE_KEYS.gemini, geminiKey.trim());
     window.localStorage.setItem(STORAGE_KEYS.reasoning, reasoningEffort);
     setStatus('saved');
     setTimeout(() => setStatus('idle'), 2000);
+  };
+
+  const handlePolicySelectionChange = (value: 'account' | 'permissive' | 'custom') => {
+    setPolicyOption(value);
+    if (value === 'account') {
+      onOpenRouterDataPolicyChange('');
+      return;
+    }
+    if (value === 'permissive') {
+      onOpenRouterDataPolicyChange('permissive');
+      return;
+    }
+    onOpenRouterDataPolicyChange(customPolicy.trim());
   };
 
   return (
@@ -137,6 +193,37 @@ export function ModelCredentialsForm({
               </select>
               <p className="mt-2 text-xs text-slate-500">
                 Higher reasoning effort typically yields better screening quality, but may use more tokens and time.
+              </p>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-slate-700">Data policy override</label>
+              <select
+                value={policyOption}
+                onChange={(event) => handlePolicySelectionChange(event.target.value as typeof policyOption)}
+                disabled={disabled}
+                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="account">Use account default (omit header)</option>
+                <option value="permissive">permissive — share data for improvements</option>
+                <option value="custom">Custom value…</option>
+              </select>
+              {policyOption === 'custom' && (
+                <input
+                  type="text"
+                  value={customPolicy}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setCustomPolicy(value);
+                    onOpenRouterDataPolicyChange(value.trim());
+                  }}
+                  placeholder="permissive"
+                  disabled={disabled}
+                  className="mt-2 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                />
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                Leave this set to the account default to honor your OpenRouter privacy mode. Provide a policy string to override
+                it for triage requests.
               </p>
             </div>
           </div>

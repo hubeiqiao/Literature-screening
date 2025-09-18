@@ -25,6 +25,7 @@ export default function HomePage() {
   const [isTriageRunning, setIsTriageRunning] = useState(false);
   const [provider, setProvider] = useState<Provider>('openrouter');
   const [openRouterKey, setOpenRouterKey] = useState('');
+  const [openRouterDataPolicy, setOpenRouterDataPolicy] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high');
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -116,7 +117,10 @@ export default function HomePage() {
         };
         if (provider === 'openrouter') {
           headers['X-OpenRouter-Key'] = openRouterKey.trim();
-          headers['X-OpenRouter-Data-Policy'] = 'permissive';
+          const dataPolicyHeader = openRouterDataPolicy.trim();
+          if (dataPolicyHeader) {
+            headers['X-OpenRouter-Data-Policy'] = dataPolicyHeader;
+          }
         } else {
           headers['X-Gemini-Key'] = geminiKey.trim();
         }
@@ -183,6 +187,8 @@ export default function HomePage() {
         onProviderChange={setProvider}
         openRouterKey={openRouterKey}
         onOpenRouterKeyChange={setOpenRouterKey}
+        openRouterDataPolicy={openRouterDataPolicy}
+        onOpenRouterDataPolicyChange={setOpenRouterDataPolicy}
         geminiKey={geminiKey}
         onGeminiKeyChange={setGeminiKey}
         reasoningEffort={reasoningEffort}
