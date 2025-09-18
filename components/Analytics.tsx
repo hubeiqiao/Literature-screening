@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect } from 'react';
-import Analytics from '@vercel/analytics';
+import { inject } from '@vercel/analytics';
 
 export function AnalyticsProvider() {
   useEffect(() => {
-    Analytics.inject();
+    inject();
   }, []);
 
   return null;
