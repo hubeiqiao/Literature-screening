@@ -183,11 +183,11 @@ export default function HomePage() {
   return (
     <main className="space-y-8">
       <header className="space-y-2">
-      <h1 className="text-3xl font-semibold text-slate-900">Literature Screening Assistant</h1>
-      <p className="text-sm text-slate-600">
-          Import a Zotero-exported BibTeX file, configure the rules you care about, and run an AI triage pass powered
-          by your chosen provider one record at a time.
-      </p>
+        <h1 className="text-3xl font-semibold text-slate-900">Literature Screening Assistant</h1>
+        <p className="text-sm text-slate-600">
+          Import a Zotero-exported BibTeX file, configure the rules you care about, and run an AI triage pass powered by your
+          chosen provider one record at a time.
+        </p>
       </header>
 
       <FileUploader onUpload={handleUpload} isLoading={isLoading} />

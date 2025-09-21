@@ -188,7 +188,7 @@ async function runOpenRouterPass({
         continue;
       }
 
-      const decision = buildDecision(entry, deterministic, parsed, model.id);
+      const decision = buildDecision(entry, deterministic, parsed, formatOpenRouterLabel(model));
       return { decision };
     } catch (err) {
       lastError = err instanceof Error ? err.message : 'Unknown OpenRouter error.';

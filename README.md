@@ -5,7 +5,7 @@ AI-assisted triage workflow for large BibTeX exports. Upload your Zotero export,
 ## Features
 - **Sequential record triage** with live progress, warnings, and exportable decisions (CSV, JSON, annotated BibTeX).
 - **Flexible criteria editor**: paste human-readable inclusion/exclusion rules; deterministic heuristics backstop LLM failures.
-- **Provider selection & reasoning control**: choose OpenRouter or Gemini, pick an OpenRouter model, adjust reasoning effort where supported, and store keys locally.
+- **Provider selection & reasoning control**: choose OpenRouter or Gemini, pick an OpenRouter model with contextual guidance, adjust reasoning effort where supported, and store keys locally.
 - **Traceable outputs**: every record captures status, confidence, matched rules, model, and rationale.
 
 ## Getting Started
@@ -23,7 +23,7 @@ Keys are stored only in your browser (localStorage) and sent with each triage re
 ## Usage Flow
 1. Upload BibTeX → records load into memory; you can inspect counts immediately.
 2. Configure provider and API key.
-   - OpenRouter users start on xAI Grok-4 fast (free) by default but can switch to GPT-OSS-120B when reasoning support is required. Reasoning effort is available only for GPT-OSS-120B.
+   - OpenRouter users start on xAI Grok-4 fast (free) by default but can switch to GPT-OSS-120B when reasoning support is required. A model picker explains token limits and whether reasoning is available; selections persist locally once you click **Save locally**.
 3. Paste or tweak inclusion/exclusion criteria; deterministic heuristics update automatically.
 4. Click **Start LLM triage pass** to process entries sequentially. Progress updates one record at a time.
 5. Review results, warnings, and export decisions as needed.
