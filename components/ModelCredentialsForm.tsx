@@ -88,56 +88,21 @@ export function ModelCredentialsForm({
     }
     if (storedOpenRouterPolicy) {
       onOpenRouterDataPolicyChange(storedOpenRouterPolicy);
-      if (storedOpenRouterPolicy === 'permissive') {
-        setPolicyOption('permissive');
-      } else {
-        setPolicyOption('custom');
-        setCustomPolicy(storedOpenRouterPolicy);
-      }
     }
     if (storedGemini) {
       onGeminiKeyChange(storedGemini);
     }
-    if (storedReasoning && ['none', 'low', 'medium', 'high'].includes(storedReasoning)) {
+    if (storedReasoning) {
       onReasoningEffortChange(storedReasoning);
     }
-    // we intentionally ignore dependencies to run only once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!openRouterDataPolicy) {
-      if (policyOption !== 'account') {
-        setPolicyOption('account');
-      }
-      if (customPolicy !== '') {
-        setCustomPolicy('');
-      }
-      return;
-    }
-    if (openRouterDataPolicy === 'permissive') {
-      if (policyOption !== 'permissive') {
-        setPolicyOption('permissive');
-      }
-      if (customPolicy !== '') {
-        setCustomPolicy('');
-      }
-      return;
-    }
-    if (policyOption !== 'custom') {
-      setPolicyOption('custom');
-    }
-    if (customPolicy !== openRouterDataPolicy) {
-      setCustomPolicy(openRouterDataPolicy);
-    }
-  }, [customPolicy, openRouterDataPolicy, policyOption]);
-
-  useEffect(() => {
-    const selectedModel = getOpenRouterModel(openRouterModel);
-    if (!selectedModel.supportsReasoning && reasoningEffort !== 'none') {
-      onReasoningEffortChange('none');
-    }
-  }, [openRouterModel, reasoningEffort, onReasoningEffortChange]);
+  }, [
+    onProviderChange,
+    onOpenRouterKeyChange,
+    onOpenRouterModelChange,
+    onOpenRouterDataPolicyChange,
+    onGeminiKeyChange,
+    onReasoningEffortChange,
+  ]);
 
   const handleSave = () => {
     if (typeof window === 'undefined') {
@@ -236,17 +201,16 @@ export function ModelCredentialsForm({
                 className="mt-2 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
               />
               <p className="mt-2 text-xs text-slate-500">
-                Generate a key at
-                {' '}
+                Create a key in{' '}
                 <a
-                  href="https://openrouter.ai/keys"
+                  href="https://openrouter.ai/settings/keys"
                   target="_blank"
                   rel="noreferrer"
                   className="font-medium text-slate-700 underline hover:text-slate-900"
                 >
-                  openrouter.ai/keys
+                  OpenRouter settings
                 </a>
-                {' '}and ensure your privacy settings allow public models.
+                , then paste it here.
               </p>
             </div>
             <div>
@@ -255,9 +219,9 @@ export function ModelCredentialsForm({
                 value={reasoningEffort}
                 onChange={(event) => onReasoningEffortChange(event.target.value as ReasoningEffort)}
                 disabled={reasoningDisabled}
-                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
               >
-                <option value="none">No reasoning</option>
+                <option value="none">None</option>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>

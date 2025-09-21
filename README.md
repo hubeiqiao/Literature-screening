@@ -18,7 +18,7 @@ AI-assisted triage workflow for large BibTeX exports. Upload your Zotero export,
 - **Data policy overrides**: The credentials panel lets you keep the request on your account's default privacy mode (no header) or send a custom `X-OpenRouter-Data-Policy` value such as `permissive` for individual runs.
 - **Google Gemini**: create a key via [Google AI Studio](https://aistudio.google.com/app/apikey) or Cloud Generative AI.
 
-Keys are stored only in your browser (localStorage) and sent with each triage request when you click “Save locally.”
+Keys are stored only in your browser (localStorage) and sent with each triage request when you click "Save locally."
 
 ## Usage Flow
 1. Upload BibTeX → records load into memory; you can inspect counts immediately.
