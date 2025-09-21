@@ -107,18 +107,30 @@ export function ModelCredentialsForm({
 
   useEffect(() => {
     if (!openRouterDataPolicy) {
-      if (policyOption !== 'custom') {
+      if (policyOption !== 'account') {
         setPolicyOption('account');
+      }
+      if (customPolicy !== '') {
+        setCustomPolicy('');
       }
       return;
     }
     if (openRouterDataPolicy === 'permissive') {
-      setPolicyOption('permissive');
+      if (policyOption !== 'permissive') {
+        setPolicyOption('permissive');
+      }
+      if (customPolicy !== '') {
+        setCustomPolicy('');
+      }
       return;
     }
-    setPolicyOption('custom');
-    setCustomPolicy(openRouterDataPolicy);
-  }, [openRouterDataPolicy, policyOption]);
+    if (policyOption !== 'custom') {
+      setPolicyOption('custom');
+    }
+    if (customPolicy !== openRouterDataPolicy) {
+      setCustomPolicy(openRouterDataPolicy);
+    }
+  }, [customPolicy, openRouterDataPolicy, policyOption]);
 
   useEffect(() => {
     const selectedModel = getOpenRouterModel(openRouterModel);

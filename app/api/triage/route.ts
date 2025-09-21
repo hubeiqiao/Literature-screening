@@ -145,6 +145,7 @@ async function runOpenRouterPass({
   model: OpenRouterModelConfig;
 }): Promise<{ decision: TriageDecision | null; warning?: string }> {
   let lastError: string | undefined;
+  const modelLabel = formatOpenRouterLabel(model);
   const effectiveEffort = model.supportsReasoning ? effort : 'none';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -188,14 +189,17 @@ async function runOpenRouterPass({
         continue;
       }
 
-      const decision = buildDecision(entry, deterministic, parsed, formatOpenRouterLabel(model));
+      const decision = buildDecision(entry, deterministic, parsed, modelLabel);
       return { decision };
     } catch (err) {
       lastError = err instanceof Error ? err.message : 'Unknown OpenRouter error.';
     }
   }
 
-  return { decision: null, warning: lastError ? `OpenRouter: ${lastError}` : 'OpenRouter failed without details.' };
+  const warning = lastError
+    ? `${modelLabel}: ${lastError}`
+    : `${modelLabel}: request failed without details.`;
+  return { decision: null, warning };
 }
 
 async function runGeminiPass({
