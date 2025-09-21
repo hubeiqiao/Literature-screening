@@ -12,6 +12,7 @@ import { parseBibtex } from '@/lib/bibtexParser';
 import { buildCriteriaFromText, getDefaultCriteriaText } from '@/lib/criteria';
 import { summarizeDecisions } from '@/lib/triage';
 import type { BibEntry, TriageDecision, TriageSummary } from '@/lib/types';
+import { DEFAULT_OPENROUTER_MODEL_ID, type OpenRouterModelId } from '@/lib/openrouter';
 
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -25,6 +26,7 @@ export default function HomePage() {
   const [isTriageRunning, setIsTriageRunning] = useState(false);
   const [provider, setProvider] = useState<Provider>('openrouter');
   const [openRouterKey, setOpenRouterKey] = useState('');
+  const [openRouterModel, setOpenRouterModel] = useState<OpenRouterModelId>(DEFAULT_OPENROUTER_MODEL_ID);
   const [openRouterDataPolicy, setOpenRouterDataPolicy] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high');
@@ -136,7 +138,9 @@ export default function HomePage() {
             },
             heuristics,
             provider,
-            reasoning: provider === 'openrouter' ? reasoningEffort : undefined,
+            ...(provider === 'openrouter'
+              ? { reasoning: reasoningEffort, model: openRouterModel }
+              : {}),
           }),
         });
 
@@ -187,6 +191,8 @@ export default function HomePage() {
         onProviderChange={setProvider}
         openRouterKey={openRouterKey}
         onOpenRouterKeyChange={setOpenRouterKey}
+        openRouterModel={openRouterModel}
+        onOpenRouterModelChange={setOpenRouterModel}
         openRouterDataPolicy={openRouterDataPolicy}
         onOpenRouterDataPolicyChange={setOpenRouterDataPolicy}
         geminiKey={geminiKey}
