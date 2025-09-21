@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileUploader } from '@/components/FileUploader';
 import { SummaryCards } from '@/components/SummaryCards';
 import { DecisionTable } from '@/components/DecisionTable';
@@ -12,6 +12,7 @@ import { parseBibtex } from '@/lib/bibtexParser';
 import { buildCriteriaFromText, getDefaultCriteriaText } from '@/lib/criteria';
 import { summarizeDecisions } from '@/lib/triage';
 import type { BibEntry, TriageDecision, TriageSummary } from '@/lib/types';
+import { DEFAULT_OPENROUTER_MODEL, findOpenRouterModel, openRouterSupportsReasoning } from '@/lib/openrouter';
 
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -24,6 +25,7 @@ export default function HomePage() {
   const [criteriaError, setCriteriaError] = useState<string | null>(null);
   const [isTriageRunning, setIsTriageRunning] = useState(false);
   const [provider, setProvider] = useState<Provider>('openrouter');
+  const [openRouterModel, setOpenRouterModel] = useState(DEFAULT_OPENROUTER_MODEL.value);
   const [openRouterKey, setOpenRouterKey] = useState('');
   const [openRouterDataPolicy, setOpenRouterDataPolicy] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
@@ -36,6 +38,19 @@ export default function HomePage() {
       status: 'idle',
     },
   );
+
+  useEffect(() => {
+    if (provider !== 'openrouter') {
+      return;
+    }
+    if (!findOpenRouterModel(openRouterModel)) {
+      setOpenRouterModel(DEFAULT_OPENROUTER_MODEL.value);
+      return;
+    }
+    if (!openRouterSupportsReasoning(openRouterModel) && reasoningEffort !== 'none') {
+      setReasoningEffort('none');
+    }
+  }, [provider, openRouterModel, reasoningEffort, setOpenRouterModel, setReasoningEffort]);
 
   const handleUpload = async (file: File) => {
     if (isTriageRunning) {
@@ -137,6 +152,7 @@ export default function HomePage() {
             heuristics,
             provider,
             reasoning: provider === 'openrouter' ? reasoningEffort : undefined,
+            model: provider === 'openrouter' ? openRouterModel : undefined,
           }),
         });
 
@@ -185,6 +201,8 @@ export default function HomePage() {
       <ModelCredentialsForm
         provider={provider}
         onProviderChange={setProvider}
+        openRouterModel={openRouterModel}
+        onOpenRouterModelChange={setOpenRouterModel}
         openRouterKey={openRouterKey}
         onOpenRouterKeyChange={setOpenRouterKey}
         openRouterDataPolicy={openRouterDataPolicy}

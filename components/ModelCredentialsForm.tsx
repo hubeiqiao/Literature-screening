@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  DEFAULT_OPENROUTER_MODEL,
+  OPENROUTER_MODELS,
+  findOpenRouterModel,
+  type OpenRouterModel,
+} from '@/lib/openrouter';
 
 type Provider = 'openrouter' | 'gemini';
 type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
@@ -8,6 +14,8 @@ type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 interface ModelCredentialsFormProps {
   provider: Provider;
   onProviderChange: (provider: Provider) => void;
+  openRouterModel: string;
+  onOpenRouterModelChange: (value: string) => void;
   openRouterKey: string;
   onOpenRouterKeyChange: (value: string) => void;
   openRouterDataPolicy: string;
@@ -21,6 +29,7 @@ interface ModelCredentialsFormProps {
 
 const STORAGE_KEYS = {
   openRouter: 'literature-screening:openrouter-key',
+  openRouterModel: 'literature-screening:openrouter-model',
   openRouterPolicy: 'literature-screening:openrouter-data-policy',
   gemini: 'literature-screening:gemini-key',
   reasoning: 'literature-screening:openrouter-reasoning',
@@ -29,6 +38,8 @@ const STORAGE_KEYS = {
 export function ModelCredentialsForm({
   provider,
   onProviderChange,
+  openRouterModel,
+  onOpenRouterModelChange,
   openRouterKey,
   onOpenRouterKeyChange,
   openRouterDataPolicy,
@@ -58,12 +69,19 @@ export function ModelCredentialsForm({
       return;
     }
     const storedOpenRouter = window.localStorage.getItem(STORAGE_KEYS.openRouter);
+    const storedModel = window.localStorage.getItem(STORAGE_KEYS.openRouterModel);
     const storedOpenRouterPolicy = window.localStorage.getItem(STORAGE_KEYS.openRouterPolicy);
     const storedGemini = window.localStorage.getItem(STORAGE_KEYS.gemini);
     const storedReasoning = window.localStorage.getItem(STORAGE_KEYS.reasoning) as ReasoningEffort | null;
 
     if (storedOpenRouter) {
       onOpenRouterKeyChange(storedOpenRouter);
+    }
+    if (storedModel) {
+      const resolvedModel = findOpenRouterModel(storedModel)?.value;
+      if (resolvedModel) {
+        onOpenRouterModelChange(resolvedModel);
+      }
     }
     if (storedOpenRouterPolicy) {
       onOpenRouterDataPolicyChange(storedOpenRouterPolicy);
@@ -104,12 +122,35 @@ export function ModelCredentialsForm({
       return;
     }
     window.localStorage.setItem(STORAGE_KEYS.openRouter, openRouterKey.trim());
+    window.localStorage.setItem(STORAGE_KEYS.openRouterModel, openRouterModel);
     window.localStorage.setItem(STORAGE_KEYS.openRouterPolicy, openRouterDataPolicy.trim());
     window.localStorage.setItem(STORAGE_KEYS.gemini, geminiKey.trim());
     window.localStorage.setItem(STORAGE_KEYS.reasoning, reasoningEffort);
     setStatus('saved');
     setTimeout(() => setStatus('idle'), 2000);
   };
+
+  const selectedOpenRouterModel: OpenRouterModel =
+    findOpenRouterModel(openRouterModel) ?? DEFAULT_OPENROUTER_MODEL;
+
+  useEffect(() => {
+    if (!findOpenRouterModel(openRouterModel)) {
+      onOpenRouterModelChange(DEFAULT_OPENROUTER_MODEL.value);
+    }
+  }, [openRouterModel, onOpenRouterModelChange]);
+
+  const reasoningEnabled = selectedOpenRouterModel.supportsReasoning;
+
+  useEffect(() => {
+    if (!reasoningEnabled && reasoningEffort !== 'none') {
+      onReasoningEffortChange('none');
+    }
+  }, [reasoningEnabled, reasoningEffort, onReasoningEffortChange]);
+
+  const reasoningEnabledLabels = useMemo(
+    () => OPENROUTER_MODELS.filter((model) => model.supportsReasoning).map((model) => model.label),
+    [],
+  );
 
   const handlePolicySelectionChange = (value: 'account' | 'permissive' | 'custom') => {
     setPolicyOption(value);
@@ -144,16 +185,36 @@ export function ModelCredentialsForm({
             disabled={disabled}
             className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
           >
-            <option value="openrouter">OpenRouter — openai/gpt-oss-120b</option>
+            <option value="openrouter">OpenRouter — GPT-OSS 120B or Grok 4 Fast</option>
             <option value="gemini">Google — Gemini 2.5 Pro</option>
           </select>
           <p className="mt-2 text-xs text-slate-500">
-            Switch providers any time; runs will use the active selection.
+            Switch providers any time; runs will use the active selection. Grok 4 Fast is available on the free OpenRouter tier,
+            while GPT-OSS 120B provides higher quality at a higher credit cost.
           </p>
         </div>
 
         {provider === 'openrouter' ? (
           <div className="grid gap-6 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-slate-700">Model</label>
+              <select
+                value={selectedOpenRouterModel.value}
+                onChange={(event) => onOpenRouterModelChange(event.target.value)}
+                disabled={disabled}
+                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              >
+                {OPENROUTER_MODELS.map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-slate-500">
+                Grok 4 Fast is ideal for quick, free test runs; GPT-OSS 120B offers deeper coverage when you have paid credits
+                available.
+              </p>
+            </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700">OpenRouter API key</label>
               <input
@@ -183,7 +244,7 @@ export function ModelCredentialsForm({
               <select
                 value={reasoningEffort}
                 onChange={(event) => onReasoningEffortChange(event.target.value as ReasoningEffort)}
-                disabled={disabled}
+                disabled={disabled || !reasoningEnabled}
                 className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="none">No reasoning</option>
@@ -192,7 +253,10 @@ export function ModelCredentialsForm({
                 <option value="high">High</option>
               </select>
               <p className="mt-2 text-xs text-slate-500">
-                Higher reasoning effort typically yields better screening quality, but may use more tokens and time.
+                Reasoning effort is available only on models that support it ({reasoningEnabledLabels.join(', ')}).
+                {reasoningEnabled
+                  ? ' Higher settings typically yield better screening quality but may use more tokens and time.'
+                  : ` ${selectedOpenRouterModel.label} runs without additional reasoning passes.`}
               </p>
             </div>
             <div className="md:col-span-2">
