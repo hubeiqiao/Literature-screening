@@ -12,7 +12,11 @@ import { parseBibtex } from '@/lib/bibtexParser';
 import { buildCriteriaFromText, getDefaultCriteriaText } from '@/lib/criteria';
 import { summarizeDecisions } from '@/lib/triage';
 import type { BibEntry, TriageDecision, TriageSummary } from '@/lib/types';
-import { DEFAULT_OPENROUTER_MODEL_ID, type OpenRouterModelId } from '@/lib/openrouter';
+import {
+  DEFAULT_OPENROUTER_MODEL_ID,
+  getOpenRouterModel,
+  type OpenRouterModelId,
+} from '@/lib/openrouter';
 
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -29,7 +33,9 @@ export default function HomePage() {
   const [openRouterModel, setOpenRouterModel] = useState<OpenRouterModelId>(DEFAULT_OPENROUTER_MODEL_ID);
   const [openRouterDataPolicy, setOpenRouterDataPolicy] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(() =>
+    getOpenRouterModel(DEFAULT_OPENROUTER_MODEL_ID).supportsReasoning ? 'high' : 'none',
+  );
   const [warnings, setWarnings] = useState<string[]>([]);
   const [progress, setProgress] = useState<{ current: number; total: number; status: 'idle' | 'running' | 'finished' | 'error' }>(
     {
@@ -177,11 +183,11 @@ export default function HomePage() {
   return (
     <main className="space-y-8">
       <header className="space-y-2">
-      <h1 className="text-3xl font-semibold text-slate-900">Literature Screening Assistant</h1>
-      <p className="text-sm text-slate-600">
-          Import a Zotero-exported BibTeX file, configure the rules you care about, and run an AI triage pass powered
-          by your chosen provider one record at a time.
-      </p>
+        <h1 className="text-3xl font-semibold text-slate-900">Literature Screening Assistant</h1>
+        <p className="text-sm text-slate-600">
+          Import a Zotero-exported BibTeX file, configure the rules you care about, and run an AI triage pass powered by your
+          chosen provider one record at a time.
+        </p>
       </header>
 
       <FileUploader onUpload={handleUpload} isLoading={isLoading} />

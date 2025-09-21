@@ -29,6 +29,7 @@ interface ModelCredentialsFormProps {
 }
 
 const STORAGE_KEYS = {
+  provider: 'literature-screening:provider',
   openRouter: 'literature-screening:openrouter-key',
   openRouterModel: 'literature-screening:openrouter-model',
   openRouterPolicy: 'literature-screening:openrouter-data-policy',
@@ -69,12 +70,16 @@ export function ModelCredentialsForm({
     if (typeof window === 'undefined') {
       return;
     }
+    const storedProvider = window.localStorage.getItem(STORAGE_KEYS.provider);
     const storedOpenRouter = window.localStorage.getItem(STORAGE_KEYS.openRouter);
     const storedOpenRouterModel = window.localStorage.getItem(STORAGE_KEYS.openRouterModel);
     const storedOpenRouterPolicy = window.localStorage.getItem(STORAGE_KEYS.openRouterPolicy);
     const storedGemini = window.localStorage.getItem(STORAGE_KEYS.gemini);
     const storedReasoning = window.localStorage.getItem(STORAGE_KEYS.reasoning) as ReasoningEffort | null;
 
+    if (storedProvider === 'openrouter' || storedProvider === 'gemini') {
+      onProviderChange(storedProvider);
+    }
     if (storedOpenRouter) {
       onOpenRouterKeyChange(storedOpenRouter);
     }
@@ -83,49 +88,27 @@ export function ModelCredentialsForm({
     }
     if (storedOpenRouterPolicy) {
       onOpenRouterDataPolicyChange(storedOpenRouterPolicy);
-      if (storedOpenRouterPolicy === 'permissive') {
-        setPolicyOption('permissive');
-      } else {
-        setPolicyOption('custom');
-        setCustomPolicy(storedOpenRouterPolicy);
-      }
     }
     if (storedGemini) {
       onGeminiKeyChange(storedGemini);
     }
-    if (storedReasoning && ['none', 'low', 'medium', 'high'].includes(storedReasoning)) {
+    if (storedReasoning) {
       onReasoningEffortChange(storedReasoning);
     }
-    // we intentionally ignore dependencies to run only once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!openRouterDataPolicy) {
-      if (policyOption !== 'custom') {
-        setPolicyOption('account');
-      }
-      return;
-    }
-    if (openRouterDataPolicy === 'permissive') {
-      setPolicyOption('permissive');
-      return;
-    }
-    setPolicyOption('custom');
-    setCustomPolicy(openRouterDataPolicy);
-  }, [openRouterDataPolicy, policyOption]);
-
-  useEffect(() => {
-    const selectedModel = getOpenRouterModel(openRouterModel);
-    if (!selectedModel.supportsReasoning && reasoningEffort !== 'none') {
-      onReasoningEffortChange('none');
-    }
-  }, [openRouterModel, reasoningEffort, onReasoningEffortChange]);
+  }, [
+    onProviderChange,
+    onOpenRouterKeyChange,
+    onOpenRouterModelChange,
+    onOpenRouterDataPolicyChange,
+    onGeminiKeyChange,
+    onReasoningEffortChange,
+  ]);
 
   const handleSave = () => {
     if (typeof window === 'undefined') {
       return;
     }
+    window.localStorage.setItem(STORAGE_KEYS.provider, provider);
     window.localStorage.setItem(STORAGE_KEYS.openRouter, openRouterKey.trim());
     window.localStorage.setItem(STORAGE_KEYS.openRouterModel, openRouterModel);
     window.localStorage.setItem(STORAGE_KEYS.openRouterPolicy, openRouterDataPolicy.trim());
@@ -151,6 +134,12 @@ export function ModelCredentialsForm({
   const selectedModel = useMemo(() => getOpenRouterModel(openRouterModel), [openRouterModel]);
   const providerLabel = useMemo(() => formatOpenRouterLabel(selectedModel), [selectedModel]);
   const reasoningDisabled = disabled || !selectedModel.supportsReasoning;
+  const modelDetails = useMemo(() => {
+    const capability = selectedModel.supportsReasoning ? 'Supports reasoning' : 'No reasoning mode';
+    const promptLimit = selectedModel.promptCharacterLimit.toLocaleString();
+    const responseLimit = selectedModel.maxTokens.toLocaleString();
+    return `${capability}. ~${promptLimit} prompt characters, ${responseLimit} max output tokens.`;
+  }, [selectedModel]);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
@@ -199,6 +188,7 @@ export function ModelCredentialsForm({
               <p className="mt-2 text-xs text-slate-500">
                 Choose from supported OpenRouter models. Stored locally for future sessions.
               </p>
+              <p className="mt-1 text-xs text-slate-500">{modelDetails}</p>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700">OpenRouter API key</label>
@@ -211,17 +201,16 @@ export function ModelCredentialsForm({
                 className="mt-2 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
               />
               <p className="mt-2 text-xs text-slate-500">
-                Generate a key at
-                {' '}
+                Create a key in{' '}
                 <a
-                  href="https://openrouter.ai/keys"
+                  href="https://openrouter.ai/settings/keys"
                   target="_blank"
                   rel="noreferrer"
                   className="font-medium text-slate-700 underline hover:text-slate-900"
                 >
-                  openrouter.ai/keys
+                  OpenRouter settings
                 </a>
-                {' '}and ensure your privacy settings allow public models.
+                , then paste it here.
               </p>
             </div>
             <div>
@@ -230,9 +219,9 @@ export function ModelCredentialsForm({
                 value={reasoningEffort}
                 onChange={(event) => onReasoningEffortChange(event.target.value as ReasoningEffort)}
                 disabled={reasoningDisabled}
-                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
               >
-                <option value="none">No reasoning</option>
+                <option value="none">None</option>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
