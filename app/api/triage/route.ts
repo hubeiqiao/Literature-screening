@@ -4,6 +4,14 @@ import { buildCriteriaFromText } from '@/lib/criteria';
 import { triageRecord } from '@/lib/triage';
 import type { CriteriaTextInput } from '@/lib/criteria';
 import type { ScreeningCriteria, TriageDecision } from '@/lib/types';
+import {
+  DEFAULT_OPENROUTER_MODEL_ID,
+  OPENROUTER_MODEL_IDS,
+  formatOpenRouterLabel,
+  getOpenRouterModel,
+  type OpenRouterModelConfig,
+  type OpenRouterModelId,
+} from '@/lib/openrouter';
 
 type Provider = 'openrouter' | 'gemini';
 type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
@@ -32,15 +40,23 @@ const instructionsSchema = z.object({
   exclusion: z.string().min(1),
 });
 
-const providerSchema = z.enum(['openrouter', 'gemini']);
-
-const requestSchema = z.object({
+const baseRequestSchema = z.object({
   entry: entrySchema,
   instructions: instructionsSchema,
   heuristics: criteriaSchema.optional(),
-  provider: providerSchema,
-  reasoning: z.enum(['none', 'low', 'medium', 'high']).optional(),
 });
+
+const openRouterRequestSchema = baseRequestSchema.extend({
+  provider: z.literal('openrouter'),
+  reasoning: z.enum(['none', 'low', 'medium', 'high']).optional(),
+  model: z.enum(OPENROUTER_MODEL_IDS).default(DEFAULT_OPENROUTER_MODEL_ID),
+});
+
+const geminiRequestSchema = baseRequestSchema.extend({
+  provider: z.literal('gemini'),
+});
+
+const requestSchema = z.discriminatedUnion('provider', [openRouterRequestSchema, geminiRequestSchema]);
 
 const MAX_ATTEMPTS = 2;
 const GEMINI_MODEL = 'gemini-2.5-pro';
@@ -51,39 +67,49 @@ export const runtime = 'nodejs';
 export async function POST(request: Request) {
   try {
     const json = await request.json();
-    const { entry, instructions, heuristics, provider, reasoning } = requestSchema.parse(json);
+    const parsed = requestSchema.parse(json);
 
-    const key = resolveApiKey(request, provider);
+    const key = resolveApiKey(request, parsed.provider);
     if (!key) {
-      const label = provider === 'gemini' ? 'Gemini' : 'OpenRouter';
+      const label = parsed.provider === 'gemini' ? 'Gemini' : 'OpenRouter';
       return NextResponse.json({ error: `Missing ${label} API key.` }, { status: 401 });
     }
 
-    const dataPolicy =
-      provider === 'openrouter'
-        ? request.headers.get('x-openrouter-data-policy')?.trim() || undefined
-        : undefined;
+    const criteriaRules =
+      parsed.heuristics ?? buildCriteriaFromText(parsed.instructions as CriteriaTextInput);
+    const deterministic = triageRecord(parsed.entry, criteriaRules as ScreeningCriteria);
 
-    const criteriaRules = heuristics ?? buildCriteriaFromText(instructions as CriteriaTextInput);
-    const deterministic = triageRecord(entry, criteriaRules as ScreeningCriteria);
+    let providerLabel: string;
+    let result: { decision: TriageDecision | null; warning?: string };
 
-    const result =
-      provider === 'openrouter'
-        ? await runOpenRouterPass({
-            entry,
-            instructions: instructions as CriteriaTextInput,
-            deterministic,
-            key,
-            dataPolicy,
-            effort: reasoning ?? 'high',
-          })
-        : await runGeminiPass({ entry, instructions: instructions as CriteriaTextInput, deterministic, key });
+    if (parsed.provider === 'openrouter') {
+      const dataPolicy = request.headers.get('x-openrouter-data-policy')?.trim() || undefined;
+      const model = getOpenRouterModel(parsed.model);
+      result = await runOpenRouterPass({
+        entry: parsed.entry,
+        instructions: parsed.instructions as CriteriaTextInput,
+        deterministic,
+        key,
+        dataPolicy,
+        effort: parsed.reasoning ?? 'high',
+        model,
+      });
+      providerLabel = formatOpenRouterLabel(model);
+    } else {
+      result = await runGeminiPass({
+        entry: parsed.entry,
+        instructions: parsed.instructions as CriteriaTextInput,
+        deterministic,
+        key,
+      });
+      providerLabel = 'Gemini 2.5 Pro';
+    }
 
     if (result.decision) {
       return NextResponse.json({ decision: result.decision, warning: result.warning });
     }
 
-    const fallback = buildFallbackDecision(entry, deterministic, result.warning, provider);
+    const fallback = buildFallbackDecision(parsed.entry, deterministic, result.warning, providerLabel);
     return NextResponse.json({ decision: fallback, warning: result.warning });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -108,6 +134,7 @@ async function runOpenRouterPass({
   key,
   dataPolicy,
   effort,
+  model,
 }: {
   entry: z.infer<typeof entrySchema>;
   instructions: CriteriaTextInput;
@@ -115,12 +142,14 @@ async function runOpenRouterPass({
   key: string;
   dataPolicy?: string;
   effort: ReasoningEffort;
+  model: OpenRouterModelConfig;
 }): Promise<{ decision: TriageDecision | null; warning?: string }> {
   let lastError: string | undefined;
+  const effectiveEffort = model.supportsReasoning ? effort : 'none';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      const payload = buildOpenRouterPayload(entry, instructions, deterministic, effort);
+      const payload = buildOpenRouterPayload(entry, instructions, deterministic, effectiveEffort, model);
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
@@ -159,7 +188,7 @@ async function runOpenRouterPass({
         continue;
       }
 
-      const decision = buildDecision(entry, deterministic, parsed, 'openai/gpt-oss-120b');
+      const decision = buildDecision(entry, deterministic, parsed, model.id);
       return { decision };
     } catch (err) {
       lastError = err instanceof Error ? err.message : 'Unknown OpenRouter error.';
@@ -244,8 +273,9 @@ function buildOpenRouterPayload(
   instructions: CriteriaTextInput,
   deterministic: ReturnType<typeof triageRecord>,
   effort: ReasoningEffort,
+  model: OpenRouterModelConfig,
 ) {
-  const userPrompt = buildUserPrompt(entry, instructions, deterministic, 12000);
+  const userPrompt = buildUserPrompt(entry, instructions, deterministic, model.promptCharacterLimit);
 
   const messages: OpenRouterRequest['messages'] = [
     {
@@ -260,13 +290,13 @@ function buildOpenRouterPayload(
   ];
 
   const request: OpenRouterRequest = {
-    model: 'openai/gpt-oss-120b',
+    model: model.id,
     messages,
-    max_tokens: 4096,
+    max_tokens: model.maxTokens,
     temperature: 0,
   };
 
-  if (effort !== 'none') {
+  if (effort !== 'none' && model.supportsReasoning) {
     request.reasoning = { effort };
   }
 
@@ -379,9 +409,8 @@ function buildFallbackDecision(
   entry: z.infer<typeof entrySchema>,
   deterministic: ReturnType<typeof triageRecord>,
   warning: string | undefined,
-  provider: Provider,
+  providerLabel: string,
 ): TriageDecision {
-  const providerLabel = provider === 'gemini' ? 'Gemini 2.5 Pro' : 'OpenRouter GPT-OSS-120B';
   return {
     key: entry.key,
     type: entry.type,
@@ -520,7 +549,7 @@ function sleep(ms: number) {
 }
 
 interface OpenRouterRequest {
-  model: string;
+  model: OpenRouterModelId;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   max_tokens: number;
   temperature: number;
