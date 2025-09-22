@@ -11,7 +11,15 @@ describe('openrouter configuration', () => {
   it('exposes grok-4 fast free as the default OpenRouter model', () => {
     const config = getOpenRouterModel(DEFAULT_OPENROUTER_MODEL_ID);
     expect(config.id).toBe('x-ai/grok-4-fast:free');
-    expect(config.supportsReasoning).toBe(false);
+    expect(config.supportsReasoning).toBe(true);
+    expect(config.promptCharacterLimit).toBe(2_000_000);
+    expect(config.maxTokens).toBe(8192);
+  });
+
+  it('includes the paid grok-4 fast tier with reasoning support', () => {
+    const paidTier = OPENROUTER_MODELS.find((model) => model.id === 'x-ai/grok-4-fast');
+    expect(paidTier).toBeDefined();
+    expect(paidTier?.supportsReasoning).toBe(true);
   });
 
   it('falls back to the default model for unknown identifiers', () => {

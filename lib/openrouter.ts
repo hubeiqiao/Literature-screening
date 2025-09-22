@@ -1,16 +1,25 @@
+export type OpenRouterReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high';
+
 export const OPENROUTER_MODELS = [
   {
     id: 'x-ai/grok-4-fast:free',
     label: 'xAI Grok-4 (fast, free)',
-    supportsReasoning: false,
-    promptCharacterLimit: 8000,
-    maxTokens: 2048,
+    supportsReasoning: true,
+    promptCharacterLimit: 2_000_000,
+    maxTokens: 8192,
+  },
+  {
+    id: 'x-ai/grok-4-fast',
+    label: 'xAI Grok-4 (fast)',
+    supportsReasoning: true,
+    promptCharacterLimit: 2_000_000,
+    maxTokens: 8192,
   },
   {
     id: 'openai/gpt-oss-120b',
     label: 'OpenAI GPT-OSS-120B',
     supportsReasoning: true,
-    promptCharacterLimit: 12000,
+    promptCharacterLimit: 12_000,
     maxTokens: 4096,
   },
 ] as const;

@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   OPENROUTER_MODELS,
-  formatOpenRouterLabel,
   getOpenRouterModel,
   isOpenRouterModelId,
   type OpenRouterModelId,
+  type OpenRouterReasoningEffort,
 } from '@/lib/openrouter';
 
 type Provider = 'openrouter' | 'gemini';
-type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
+type ReasoningEffort = OpenRouterReasoningEffort;
 
 interface ModelCredentialsFormProps {
   provider: Provider;
@@ -132,7 +132,7 @@ export function ModelCredentialsForm({
   };
 
   const selectedModel = useMemo(() => getOpenRouterModel(openRouterModel), [openRouterModel]);
-  const providerLabel = useMemo(() => formatOpenRouterLabel(selectedModel), [selectedModel]);
+  const providerLabel = 'OpenRouter';
   const reasoningDisabled = disabled || !selectedModel.supportsReasoning;
   const modelDetails = useMemo(() => {
     const capability = selectedModel.supportsReasoning ? 'Supports reasoning' : 'No reasoning mode';
@@ -222,6 +222,7 @@ export function ModelCredentialsForm({
                 className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
               >
                 <option value="none">None</option>
+                <option value="minimal">Minimal</option>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
