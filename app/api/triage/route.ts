@@ -11,10 +11,11 @@ import {
   getOpenRouterModel,
   type OpenRouterModelConfig,
   type OpenRouterModelId,
+  type OpenRouterReasoningEffort,
 } from '@/lib/openrouter';
 
 type Provider = 'openrouter' | 'gemini';
-type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
+type ReasoningEffort = OpenRouterReasoningEffort;
 
 const fieldMapSchema = z.record(z.string());
 
@@ -48,7 +49,7 @@ const baseRequestSchema = z.object({
 
 const openRouterRequestSchema = baseRequestSchema.extend({
   provider: z.literal('openrouter'),
-  reasoning: z.enum(['none', 'low', 'medium', 'high']).optional(),
+  reasoning: z.enum(['none', 'minimal', 'low', 'medium', 'high']).optional(),
   model: z.enum(OPENROUTER_MODEL_IDS).default(DEFAULT_OPENROUTER_MODEL_ID),
 });
 
@@ -301,7 +302,7 @@ function buildOpenRouterPayload(
   };
 
   if (effort !== 'none' && model.supportsReasoning) {
-    request.reasoning = { effort };
+    request.reasoning = { enabled: true, effort };
   }
 
   return request;
@@ -558,7 +559,8 @@ interface OpenRouterRequest {
   max_tokens: number;
   temperature: number;
   reasoning?: {
-    effort: 'low' | 'medium' | 'high';
+    enabled: true;
+    effort: 'minimal' | 'low' | 'medium' | 'high';
   };
 }
 
@@ -597,3 +599,5 @@ interface GeminiResponse {
     output?: string;
   }>;
 }
+
+export { buildOpenRouterPayload };
