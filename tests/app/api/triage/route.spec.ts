@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOpenRouterPayload } from '../../../../app/api/triage/route';
+import { buildOpenRouterPayload } from '../../../../app/api/triage/payloads';
 import { getOpenRouterModel } from '@/lib/openrouter';
 import type { CriteriaTextInput } from '@/lib/criteria';
 import type { RuleMatch } from '@/lib/types';

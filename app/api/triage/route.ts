@@ -10,9 +10,9 @@ import {
   formatOpenRouterLabel,
   getOpenRouterModel,
   type OpenRouterModelConfig,
-  type OpenRouterModelId,
   type OpenRouterReasoningEffort,
 } from '@/lib/openrouter';
+import { buildGeminiPayload, buildOpenRouterPayload } from './payloads';
 
 type Provider = 'openrouter' | 'gemini';
 type ReasoningEffort = OpenRouterReasoningEffort;
@@ -61,7 +61,6 @@ const requestSchema = z.discriminatedUnion('provider', [openRouterRequestSchema,
 
 const MAX_ATTEMPTS = 2;
 const GEMINI_MODEL = 'gemini-2.5-pro';
-const GEMINI_THINKING_BUDGET = 4096;
 
 export const runtime = 'nodejs';
 
@@ -273,119 +272,6 @@ async function runGeminiPass({
   return { decision: null, warning: lastError ? `Gemini: ${lastError}` : 'Gemini failed without details.' };
 }
 
-function buildOpenRouterPayload(
-  entry: z.infer<typeof entrySchema>,
-  instructions: CriteriaTextInput,
-  deterministic: ReturnType<typeof triageRecord>,
-  effort: ReasoningEffort,
-  model: OpenRouterModelConfig,
-) {
-  const userPrompt = buildUserPrompt(entry, instructions, deterministic, model.promptCharacterLimit);
-
-  const messages: OpenRouterRequest['messages'] = [
-    {
-      role: 'system',
-      content:
-        'You are a rigorous systematic review screening assistant. Always return valid JSON with keys: status, confidence, rationale, criteria_refs, model.',
-    },
-    {
-      role: 'user',
-      content: JSON.stringify(userPrompt),
-    },
-  ];
-
-  const request: OpenRouterRequest = {
-    model: model.id,
-    messages,
-    max_tokens: model.maxTokens,
-    temperature: 0,
-  };
-
-  if (effort !== 'none' && model.supportsReasoning) {
-    request.reasoning = { enabled: true, effort };
-  }
-
-  return request;
-}
-
-function buildGeminiPayload(
-  entry: z.infer<typeof entrySchema>,
-  instructions: CriteriaTextInput,
-  deterministic: ReturnType<typeof triageRecord>,
-  simpleMode: boolean,
-) {
-  const limit = simpleMode ? 2500 : 4000;
-  const userPrompt = buildUserPrompt(entry, instructions, deterministic, limit);
-
-  const request: GeminiRequest = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: JSON.stringify(userPrompt) }],
-      },
-    ],
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: simpleMode ? 1024 : 2048,
-    },
-  };
-
-  if (!simpleMode) {
-    request.systemInstruction = {
-      parts: [{ text: 'You are a systematic review screening assistant. Respond with strict JSON only.' }],
-    };
-    request.generationConfig.responseMimeType = 'application/json';
-    request.thinkingConfig = {
-      thinkingBudget: Math.min(GEMINI_THINKING_BUDGET, 2048),
-    };
-  }
-
-  return request;
-}
-
-function buildUserPrompt(
-  entry: z.infer<typeof entrySchema>,
-  instructions: CriteriaTextInput,
-  deterministic: ReturnType<typeof triageRecord>,
-  limit: number,
-) {
-  const record = extractRecordFields(entry);
-  const trimmedInstructions = {
-    inclusion: truncate(instructions.inclusion, limit),
-    exclusion: truncate(instructions.exclusion, limit),
-  } satisfies CriteriaTextInput;
-
-  return {
-    record,
-    instructions: trimmedInstructions,
-    deterministic,
-    expected_json: {
-      status: 'Include | Exclude | Maybe',
-      confidence: '0-1 number',
-      rationale: '50-150 word explanation citing criteria IDs',
-      criteria_refs: 'array of criteria IDs referenced',
-    },
-  };
-}
-
-function extractRecordFields(entry: z.infer<typeof entrySchema>) {
-  const keywords = (entry.fields.keywords || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return {
-    key: entry.key,
-    type: entry.type,
-    title: entry.fields.title || '',
-    abstract: entry.fields.abstract || '',
-    keywords,
-    year: entry.fields.year || '',
-    notes: entry.fields.note || entry.fields.notes || '',
-    venue: entry.fields.journal || entry.fields.booktitle || '',
-  };
-}
-
 function buildDecision(
   entry: z.infer<typeof entrySchema>,
   deterministic: ReturnType<typeof triageRecord>,
@@ -447,13 +333,6 @@ function normalizeStatus(status?: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function truncate(text: string, limit: number) {
-  if (text.length <= limit) {
-    return text;
-  }
-  return `${text.slice(0, limit - 3)}...`;
 }
 
 function safeParseLLMJson(raw: string) {
@@ -553,17 +432,6 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-interface OpenRouterRequest {
-  model: OpenRouterModelId;
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-  max_tokens: number;
-  temperature: number;
-  reasoning?: {
-    enabled: true;
-    effort: 'minimal' | 'low' | 'medium' | 'high';
-  };
-}
-
 interface OpenRouterResponse {
   choices: Array<{
     message?: {
@@ -571,24 +439,6 @@ interface OpenRouterResponse {
     };
     content?: string;
   }>;
-}
-
-interface GeminiRequest {
-  systemInstruction?: {
-    parts: Array<{ text?: string }>;
-  };
-  contents: Array<{
-    role: string;
-    parts: Array<{ text?: string }>;
-  }>;
-  generationConfig: {
-    temperature: number;
-    maxOutputTokens: number;
-    responseMimeType?: string;
-  };
-  thinkingConfig?: {
-    thinkingBudget?: number;
-  };
 }
 
 interface GeminiResponse {
@@ -599,5 +449,3 @@ interface GeminiResponse {
     output?: string;
   }>;
 }
-
-export { buildOpenRouterPayload };
