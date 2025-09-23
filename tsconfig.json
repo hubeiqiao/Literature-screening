@@ -25,6 +25,15 @@
       ],
       "@/components/*": [
         "components/*"
+      ],
+      "next-auth": [
+        "lib/auth/stub/index"
+      ],
+      "next-auth/react": [
+        "lib/auth/stub/react"
+      ],
+      "next-auth/providers/google": [
+        "lib/auth/stub/providers/google"
       ]
     },
     "plugins": [
