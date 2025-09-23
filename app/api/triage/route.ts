@@ -1,9 +1,28 @@
+import '@/lib/config/validateEnv';
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import type { Session } from 'next-auth';
 import { z } from 'zod';
 import { buildCriteriaFromText } from '@/lib/criteria';
 import { triageRecord } from '@/lib/triage';
 import type { CriteriaTextInput } from '@/lib/criteria';
-import type { ScreeningCriteria, TriageDecision } from '@/lib/types';
+import {
+  type ScreeningCriteria,
+  type TriageDecision,
+  type TokenUsageBreakdown,
+  type TriageRunCost,
+  type TriageRunRecord,
+} from '@/lib/types';
+import { getFirestore } from '@/lib/cloud/firestore';
+import { authOptions } from '@/lib/auth/options';
+import { USAGE_MODES, type UsageMode } from '@/lib/usageMode';
+import { getSessionUserId } from '@/lib/auth/session';
+import {
+  debitBalance,
+  getLedgerBalance,
+  InsufficientCreditError,
+  isLedgerEnabled,
+} from '@/lib/billing/ledger';
 import {
   DEFAULT_OPENROUTER_MODEL_ID,
   OPENROUTER_MODEL_IDS,
@@ -12,7 +31,7 @@ import {
   type OpenRouterModelConfig,
   type OpenRouterReasoningEffort,
 } from '@/lib/openrouter';
-import { buildGeminiPayload, buildOpenRouterPayload } from './payloads';
+import { buildGeminiPayload, buildOpenRouterPayload, type OpenRouterRequest } from './payloads';
 
 type Provider = 'openrouter' | 'gemini';
 type ReasoningEffort = OpenRouterReasoningEffort;
@@ -49,6 +68,7 @@ const baseRequestSchema = z.object({
 
 const openRouterRequestSchema = baseRequestSchema.extend({
   provider: z.literal('openrouter'),
+  usageMode: z.enum(USAGE_MODES).default('byok'),
   reasoning: z.enum(['none', 'minimal', 'low', 'medium', 'high']).optional(),
   model: z.enum(OPENROUTER_MODEL_IDS).default(DEFAULT_OPENROUTER_MODEL_ID),
 });
@@ -69,48 +89,190 @@ export async function POST(request: Request) {
     const json = await request.json();
     const parsed = requestSchema.parse(json);
 
-    const key = resolveApiKey(request, parsed.provider);
+    const usageMode: UsageMode =
+      parsed.provider === 'openrouter' ? parsed.usageMode ?? 'byok' : 'byok';
+
+    let session = null;
+    if (parsed.provider === 'openrouter' && usageMode === 'managed') {
+      session = await getServerSession(authOptions);
+      if (!session) {
+        return NextResponse.json(
+          { error: 'Sign in required for managed OpenRouter access.' },
+          { status: 401 },
+        );
+      }
+    }
+
+    const key = resolveApiKey(request, parsed.provider, usageMode, session);
     if (!key) {
       const label = parsed.provider === 'gemini' ? 'Gemini' : 'OpenRouter';
       return NextResponse.json({ error: `Missing ${label} API key.` }, { status: 401 });
     }
 
-    const criteriaRules =
-      parsed.heuristics ?? buildCriteriaFromText(parsed.instructions as CriteriaTextInput);
-    const deterministic = triageRecord(parsed.entry, criteriaRules as ScreeningCriteria);
+    const criteriaRules = (
+      parsed.heuristics ?? buildCriteriaFromText(parsed.instructions as CriteriaTextInput)
+    ) as ScreeningCriteria;
+    const deterministic = triageRecord(parsed.entry, criteriaRules);
 
     let providerLabel: string;
-    let result: { decision: TriageDecision | null; warning?: string };
+    let decisionFromProvider: TriageDecision | null = null;
+    let warning: string | undefined;
+    let tokenUsage: TokenUsageBreakdown | null = null;
+    let rawUsage: OpenRouterUsage | null = null;
+    let costSummary: TriageRunCost | null = null;
 
     if (parsed.provider === 'openrouter') {
       const dataPolicy = request.headers.get('x-openrouter-data-policy')?.trim() || undefined;
       const model = getOpenRouterModel(parsed.model);
-      result = await runOpenRouterPass({
+      const requestedEffort: ReasoningEffort = parsed.reasoning ?? 'high';
+      const effectiveEffort: ReasoningEffort = model.supportsReasoning ? requestedEffort : 'none';
+      const payload = buildOpenRouterPayload(
+        parsed.entry,
+        parsed.instructions as CriteriaTextInput,
+        deterministic,
+        effectiveEffort,
+        model,
+      );
+      const usageEstimate = estimateOpenRouterUsage(payload);
+      const estimatedCostCents = estimateOpenRouterCostCents(model, usageEstimate);
+      const ledgerActive = usageMode === 'managed' && isLedgerEnabled();
+      let managedUserId: string | null = null;
+      let balanceBeforeCents: number | null = null;
+      let balanceAfterCents: number | null = null;
+      let actualCostCents: number | null = null;
+
+      if (usageMode === 'managed') {
+        managedUserId = getSessionUserId(session);
+        if (!managedUserId) {
+          return NextResponse.json(
+            { error: 'Unable to resolve user identity for managed usage.' },
+            { status: 403 },
+          );
+        }
+      }
+
+      if (ledgerActive && managedUserId) {
+        const firestore = getFirestore();
+        const balanceSnapshot = await getLedgerBalance({ firestore, userId: managedUserId });
+        balanceBeforeCents = balanceSnapshot.balanceCents;
+        if (estimatedCostCents > 0 && balanceSnapshot.balanceCents < estimatedCostCents) {
+          return NextResponse.json(
+            {
+              error: 'Managed credits too low for this run. Add funds before retrying.',
+              balanceCents: balanceSnapshot.balanceCents,
+              estimatedCostCents,
+            },
+            { status: 402 },
+          );
+        }
+      }
+
+      const result = await runOpenRouterPass({
         entry: parsed.entry,
-        instructions: parsed.instructions as CriteriaTextInput,
         deterministic,
         key,
         dataPolicy,
-        effort: parsed.reasoning ?? 'high',
         model,
+        payload,
       });
+      decisionFromProvider = result.decision;
+      warning = result.warning;
+      tokenUsage = result.usage ?? null;
+      rawUsage = result.rawUsage ?? null;
       providerLabel = formatOpenRouterLabel(model);
+
+      if (ledgerActive && managedUserId) {
+        const firestore = getFirestore();
+        actualCostCents = calculateActualCostCents({
+          rawUsage,
+          tokenUsage,
+          model,
+          estimatedCostCents,
+          fallbackUsage: usageEstimate,
+        });
+
+        let amountToDebit = actualCostCents ?? estimatedCostCents ?? 0;
+        if (balanceBeforeCents !== null) {
+          amountToDebit = Math.min(amountToDebit, Math.max(balanceBeforeCents, 0));
+        }
+
+        if (amountToDebit > 0) {
+          try {
+            const debit = await debitBalance({
+              firestore,
+              userId: managedUserId,
+              amountCents: Math.max(0, Math.round(amountToDebit)),
+              metadata: {
+                provider: 'openrouter',
+                model: model.id,
+                usageMode,
+                estimatedCostCents,
+                actualCostCents: actualCostCents ?? null,
+              },
+            });
+            balanceBeforeCents = debit.previousBalanceCents;
+            balanceAfterCents = debit.newBalanceCents;
+            actualCostCents = Math.max(0, Math.round(amountToDebit));
+          } catch (debitError) {
+            if (debitError instanceof InsufficientCreditError) {
+              return NextResponse.json(
+                {
+                  error: 'Managed credits were exhausted while finalizing this run. Please top up and retry.',
+                  balanceCents: balanceBeforeCents ?? 0,
+                  attemptedDebitCents: Math.max(0, Math.round(amountToDebit)),
+                },
+                { status: 402 },
+              );
+            }
+            throw debitError;
+          }
+        } else if (balanceBeforeCents !== null) {
+          balanceAfterCents = balanceBeforeCents;
+        }
+
+        costSummary = {
+          currency: 'usd',
+          estimatedCents: estimatedCostCents,
+          actualCents: actualCostCents ?? (amountToDebit > 0 ? Math.max(0, Math.round(amountToDebit)) : 0),
+          balanceBeforeCents,
+          balanceAfterCents,
+        };
+      }
     } else {
-      result = await runGeminiPass({
+      const result = await runGeminiPass({
         entry: parsed.entry,
         instructions: parsed.instructions as CriteriaTextInput,
         deterministic,
         key,
       });
+      decisionFromProvider = result.decision;
+      warning = result.warning;
       providerLabel = 'Gemini 2.5 Pro';
     }
 
-    if (result.decision) {
-      return NextResponse.json({ decision: result.decision, warning: result.warning });
-    }
+    const finalDecision =
+      decisionFromProvider ??
+      buildFallbackDecision(parsed.entry, deterministic, warning, providerLabel);
 
-    const fallback = buildFallbackDecision(parsed.entry, deterministic, result.warning, providerLabel);
-    return NextResponse.json({ decision: fallback, warning: result.warning });
+    const loggingSession = session ?? (await getServerSession(authOptions));
+
+    await recordTriageRun({
+      session: loggingSession,
+      provider: parsed.provider,
+      usageMode,
+      heuristics: criteriaRules,
+      decision: finalDecision,
+      warning,
+      tokenUsage,
+      cost: costSummary,
+    });
+
+    return NextResponse.json({
+      decision: finalDecision,
+      warning,
+      usage: tokenUsage,
+      cost: costSummary,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues.map((issue) => issue.message).join('; ') }, { status: 400 });
@@ -120,37 +282,93 @@ export async function POST(request: Request) {
   }
 }
 
-function resolveApiKey(request: Request, provider: Provider) {
+function resolveApiKey(
+  request: Request,
+  provider: Provider,
+  usageMode: UsageMode,
+  session: Session | null,
+) {
   if (provider === 'openrouter') {
-    return request.headers.get('x-openrouter-key')?.trim() || process.env.OPENROUTER_API_KEY || undefined;
+    if (usageMode === 'managed') {
+      if (!session) {
+        return undefined;
+      }
+      return process.env.OPENROUTER_API_KEY?.trim() || undefined;
+    }
+    return request.headers.get('x-openrouter-key')?.trim() || undefined;
   }
   return request.headers.get('x-gemini-key')?.trim() || process.env.GEMINI_API_KEY || undefined;
 }
 
+async function recordTriageRun({
+  session,
+  provider,
+  usageMode,
+  heuristics,
+  decision,
+  warning,
+  tokenUsage,
+  cost,
+}: {
+  session: Session | null;
+  provider: Provider;
+  usageMode: UsageMode;
+  heuristics: ScreeningCriteria;
+  decision: TriageDecision;
+  warning?: string;
+  tokenUsage: TokenUsageBreakdown | null;
+  cost: TriageRunCost | null;
+}) {
+  if (process.env.SKIP_ENV_VALIDATION === 'true') {
+    return;
+  }
+
+  try {
+    const firestore = getFirestore();
+    const userId = getSessionUserId(session);
+    const record: TriageRunRecord = {
+      userId,
+      provider,
+      usageMode,
+      heuristics,
+      decision,
+      tokenUsage,
+      cost: cost ?? null,
+      warning: warning ?? null,
+      timestamp: new Date().toISOString(),
+    };
+
+    await firestore.collection('triageRuns').add(record);
+  } catch (error) {
+    console.error('[triage-api] failed to record triage run', error);
+  }
+}
+
 async function runOpenRouterPass({
   entry,
-  instructions,
   deterministic,
   key,
   dataPolicy,
-  effort,
   model,
+  payload,
 }: {
   entry: z.infer<typeof entrySchema>;
-  instructions: CriteriaTextInput;
   deterministic: ReturnType<typeof triageRecord>;
   key: string;
   dataPolicy?: string;
-  effort: ReasoningEffort;
   model: OpenRouterModelConfig;
-}): Promise<{ decision: TriageDecision | null; warning?: string }> {
+  payload: OpenRouterRequest;
+}): Promise<{
+  decision: TriageDecision | null;
+  warning?: string;
+  usage: TokenUsageBreakdown | null;
+  rawUsage: OpenRouterUsage | null;
+}> {
   let lastError: string | undefined;
   const modelLabel = formatOpenRouterLabel(model);
-  const effectiveEffort = model.supportsReasoning ? effort : 'none';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      const payload = buildOpenRouterPayload(entry, instructions, deterministic, effectiveEffort, model);
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
@@ -177,6 +395,8 @@ async function runOpenRouterPass({
       }
 
       const completion: OpenRouterResponse = await response.json();
+      const usage = parseTokenUsage(completion.usage);
+      const rawUsage = completion.usage ?? null;
       const content = extractOpenRouterContent(completion);
       if (!content) {
         lastError = 'OpenRouter response missing content.';
@@ -190,7 +410,7 @@ async function runOpenRouterPass({
       }
 
       const decision = buildDecision(entry, deterministic, parsed, modelLabel);
-      return { decision };
+      return { decision, usage, rawUsage };
     } catch (err) {
       lastError = err instanceof Error ? err.message : 'Unknown OpenRouter error.';
     }
@@ -199,7 +419,131 @@ async function runOpenRouterPass({
   const warning = lastError
     ? `${modelLabel}: ${lastError}`
     : `${modelLabel}: request failed without details.`;
-  return { decision: null, warning };
+  return { decision: null, warning, usage: null, rawUsage: null };
+}
+
+function parseTokenUsage(usage?: OpenRouterUsage | null): TokenUsageBreakdown | null {
+  if (!usage) {
+    return null;
+  }
+
+  const tokenUsage: TokenUsageBreakdown = {};
+
+  if (typeof usage.prompt_tokens === 'number') {
+    tokenUsage.promptTokens = usage.prompt_tokens;
+  }
+  if (typeof usage.completion_tokens === 'number') {
+    tokenUsage.completionTokens = usage.completion_tokens;
+  }
+  if (typeof usage.total_tokens === 'number') {
+    tokenUsage.totalTokens = usage.total_tokens;
+  }
+
+  return Object.keys(tokenUsage).length > 0 ? tokenUsage : null;
+}
+
+interface UsageEstimate {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+const COST_ESTIMATE_BUFFER = 1.35;
+
+function estimateOpenRouterUsage(payload: OpenRouterRequest): UsageEstimate {
+  const promptCharacters = payload.messages.reduce((total, message) => total + message.content.length, 0);
+  const promptTokens = Math.max(400, Math.ceil(promptCharacters / 3.8));
+  const completionRatio = payload.reasoning ? 0.65 : 0.5;
+  const completionEstimate = Math.round(payload.max_tokens * completionRatio);
+  const completionTokens = Math.max(512, Math.min(payload.max_tokens, completionEstimate));
+  const totalTokens = promptTokens + completionTokens;
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+function estimateOpenRouterCostCents(model: OpenRouterModelConfig, usage: UsageEstimate): number {
+  const pricing = model.pricing;
+  if (!pricing) {
+    return 0;
+  }
+  const promptUsd = (usage.promptTokens / 1000) * pricing.promptCostPer1K;
+  const completionUsd = (usage.completionTokens / 1000) * pricing.completionCostPer1K;
+  const bufferedUsd = (promptUsd + completionUsd) * COST_ESTIMATE_BUFFER;
+  const cents = Math.round(bufferedUsd * 100);
+  const minimum = pricing.minimumChargeCents ?? 0;
+  return Math.max(cents, minimum);
+}
+
+function calculateActualCostCents({
+  rawUsage,
+  tokenUsage,
+  model,
+  estimatedCostCents,
+  fallbackUsage,
+}: {
+  rawUsage: OpenRouterUsage | null;
+  tokenUsage: TokenUsageBreakdown | null;
+  model: OpenRouterModelConfig;
+  estimatedCostCents: number;
+  fallbackUsage: UsageEstimate;
+}): number {
+  const directCostUsd =
+    extractUsdCost(rawUsage?.total_cost) ?? extractUsdCost(rawUsage?.estimated_cost);
+  if (directCostUsd != null) {
+    return Math.max(0, Math.round(directCostUsd * 100));
+  }
+
+  const promptCostUsd = extractUsdCost(rawUsage?.prompt_cost);
+  const completionCostUsd = extractUsdCost(rawUsage?.completion_cost);
+  if (promptCostUsd != null || completionCostUsd != null) {
+    const totalUsd = (promptCostUsd ?? 0) + (completionCostUsd ?? 0);
+    return Math.max(0, Math.round(totalUsd * 100));
+  }
+
+  const pricing = model.pricing;
+  if (pricing) {
+    const promptTokens =
+      tokenUsage?.promptTokens ??
+      (typeof rawUsage?.prompt_tokens === 'number' ? rawUsage.prompt_tokens : fallbackUsage.promptTokens);
+    const completionTokens =
+      tokenUsage?.completionTokens ??
+      (typeof rawUsage?.completion_tokens === 'number'
+        ? rawUsage.completion_tokens
+        : fallbackUsage.completionTokens);
+    const promptUsd = (promptTokens / 1000) * pricing.promptCostPer1K;
+    const completionUsd = (completionTokens / 1000) * pricing.completionCostPer1K;
+    const cents = Math.max(
+      Math.round((promptUsd + completionUsd) * 100),
+      pricing.minimumChargeCents ?? 0,
+    );
+    if (cents > 0) {
+      return cents;
+    }
+  }
+
+  return estimatedCostCents > 0 ? estimatedCostCents : 0;
+}
+
+function extractUsdCost(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (typeof record.usd === 'number') {
+      return record.usd;
+    }
+    if (typeof record.amount === 'number') {
+      return record.amount;
+    }
+    if (typeof record.value === 'number') {
+      return record.value;
+    }
+  }
+  return null;
 }
 
 async function runGeminiPass({
@@ -432,6 +776,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+interface OpenRouterUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  total_cost?: unknown;
+  prompt_cost?: unknown;
+  completion_cost?: unknown;
+  estimated_cost?: unknown;
+}
+
 interface OpenRouterResponse {
   choices: Array<{
     message?: {
@@ -439,6 +793,7 @@ interface OpenRouterResponse {
     };
     content?: string;
   }>;
+  usage?: OpenRouterUsage;
 }
 
 interface GeminiResponse {

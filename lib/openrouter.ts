@@ -1,5 +1,11 @@
 export type OpenRouterReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high';
 
+export interface OpenRouterModelPricing {
+  promptCostPer1K: number;
+  completionCostPer1K: number;
+  minimumChargeCents?: number;
+}
+
 export const OPENROUTER_MODELS = [
   {
     id: 'x-ai/grok-4-fast:free',
@@ -7,6 +13,11 @@ export const OPENROUTER_MODELS = [
     supportsReasoning: true,
     promptCharacterLimit: 2_000_000,
     maxTokens: 8192,
+    pricing: {
+      promptCostPer1K: 0,
+      completionCostPer1K: 0,
+      minimumChargeCents: 0,
+    },
   },
   {
     id: 'x-ai/grok-4-fast',
@@ -14,6 +25,11 @@ export const OPENROUTER_MODELS = [
     supportsReasoning: true,
     promptCharacterLimit: 2_000_000,
     maxTokens: 8192,
+    pricing: {
+      promptCostPer1K: 0.005,
+      completionCostPer1K: 0.015,
+      minimumChargeCents: 35,
+    },
   },
   {
     id: 'openai/gpt-oss-120b',
@@ -21,6 +37,11 @@ export const OPENROUTER_MODELS = [
     supportsReasoning: true,
     promptCharacterLimit: 12_000,
     maxTokens: 4096,
+    pricing: {
+      promptCostPer1K: 0.0075,
+      completionCostPer1K: 0.02,
+      minimumChargeCents: 45,
+    },
   },
 ] as const;
 

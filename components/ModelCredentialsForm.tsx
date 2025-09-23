@@ -8,6 +8,8 @@ import {
   type OpenRouterModelId,
   type OpenRouterReasoningEffort,
 } from '@/lib/openrouter';
+import { UsageModeSelector } from './UsageModeSelector';
+import type { UsageMode } from '@/lib/usageMode';
 
 type Provider = 'openrouter' | 'gemini';
 type ReasoningEffort = OpenRouterReasoningEffort;
@@ -15,6 +17,10 @@ type ReasoningEffort = OpenRouterReasoningEffort;
 interface ModelCredentialsFormProps {
   provider: Provider;
   onProviderChange: (provider: Provider) => void;
+  usageMode: UsageMode;
+  onUsageModeChange: (mode: UsageMode) => void;
+  isManagedAvailable: boolean;
+  authStatus: 'loading' | 'authenticated' | 'unauthenticated';
   openRouterKey: string;
   onOpenRouterKeyChange: (value: string) => void;
   openRouterModel: OpenRouterModelId;
@@ -40,6 +46,10 @@ const STORAGE_KEYS = {
 export function ModelCredentialsForm({
   provider,
   onProviderChange,
+  usageMode,
+  onUsageModeChange,
+  isManagedAvailable,
+  authStatus,
   openRouterKey,
   onOpenRouterKeyChange,
   openRouterModel,
@@ -172,6 +182,15 @@ export function ModelCredentialsForm({
         {provider === 'openrouter' ? (
           <div className="grid gap-6 md:grid-cols-2">
             <div className="md:col-span-2">
+              <UsageModeSelector
+                mode={usageMode}
+                onChange={onUsageModeChange}
+                isManagedAvailable={isManagedAvailable}
+                disabled={disabled}
+                authStatus={authStatus}
+              />
+            </div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-slate-700">Model</label>
               <select
                 value={openRouterModel}
@@ -190,29 +209,36 @@ export function ModelCredentialsForm({
               </p>
               <p className="mt-1 text-xs text-slate-500">{modelDetails}</p>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700">OpenRouter API key</label>
-              <input
-                type="password"
-                value={openRouterKey}
-                onChange={(event) => onOpenRouterKeyChange(event.target.value)}
-                placeholder="sk-or-..."
-                disabled={disabled}
-                className="mt-2 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
-              />
-              <p className="mt-2 text-xs text-slate-500">
-                Create a key in{' '}
-                <a
-                  href="https://openrouter.ai/settings/keys"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-slate-700 underline hover:text-slate-900"
-                >
-                  OpenRouter settings
-                </a>
-                , then paste it here.
-              </p>
-            </div>
+            {usageMode === 'byok' ? (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">OpenRouter API key</label>
+                <input
+                  type="password"
+                  value={openRouterKey}
+                  onChange={(event) => onOpenRouterKeyChange(event.target.value)}
+                  placeholder="sk-or-..."
+                  disabled={disabled}
+                  className="mt-2 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                />
+                <p className="mt-2 text-xs text-slate-500">
+                  Create a key in{' '}
+                  <a
+                    href="https://openrouter.ai/settings/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-slate-700 underline hover:text-slate-900"
+                  >
+                    OpenRouter settings
+                  </a>
+                  , then paste it here.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                Managed mode will call OpenRouter with the hosted project key once you are signed in with Google. No local key is
+                required.
+              </div>
+            )}
             <div>
               <label className="block text-sm font-semibold text-slate-700">Reasoning effort</label>
               <select

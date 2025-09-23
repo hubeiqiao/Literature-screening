@@ -1,3 +1,5 @@
+import type { UsageMode } from './usageMode';
+
 export type BibFieldMap = Record<string, string>;
 
 export interface BibEntry {
@@ -45,4 +47,34 @@ export interface TriageSummary {
 export interface TriageResponse {
   summary: TriageSummary;
   decisions: TriageDecision[];
+}
+
+export interface TokenUsageBreakdown {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
+export interface TriageRunCost {
+  currency: 'usd';
+  estimatedCents: number | null;
+  actualCents: number | null;
+  balanceBeforeCents: number | null;
+  balanceAfterCents: number | null;
+}
+
+export interface TriageRunRecord {
+  userId: string | null;
+  provider: 'openrouter' | 'gemini';
+  usageMode: UsageMode;
+  heuristics: ScreeningCriteria;
+  decision: TriageDecision;
+  tokenUsage: TokenUsageBreakdown | null;
+  cost?: TriageRunCost | null;
+  warning?: string | null;
+  timestamp: string;
+}
+
+export interface TriageRunHistoryEntry extends TriageRunRecord {
+  id: string;
 }
